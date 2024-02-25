@@ -13,7 +13,6 @@ do_thing() {
     #/ int
     fakeint="lol"
 
-    #/ int
     value=1
 }"#;
 
@@ -166,7 +165,10 @@ impl<'a> FileInfo<'a> {
                     if inferred_type.matches(&suggested_type) {
                         TypeDeclaration {
                             bash_type: suggested_type,
-                            range: comment.range,
+                            range: Range {
+                                start: comment.range.start,
+                                end: inferred_location.end,
+                            },
                             method: Method::Declared,
                         }
                     } else {
@@ -184,7 +186,7 @@ impl<'a> FileInfo<'a> {
                                 .with_label(
                                     Label::new(inferred_location)
                                         .with_message(format!(
-                                            "Type later inferred to be {}",
+                                            "Type inferred to be {}",
                                             inferred_type.fg(self.config.inferred_color)
                                         ))
                                         .with_color(self.config.inferred_color),
@@ -210,8 +212,13 @@ impl<'a> FileInfo<'a> {
                                 .with_label(label_from_type_declaration(
                                     previous_type,
                                     &self.config,
+                                    false,
                                 ))
-                                .with_label(label_from_type_declaration(&final_type, &self.config))
+                                .with_label(label_from_type_declaration(
+                                    &final_type,
+                                    &self.config,
+                                    true,
+                                ))
                                 .finish(),
                         );
                     }
@@ -245,14 +252,19 @@ impl<'a> FileInfo<'a> {
     }
 }
 
-fn label_from_type_declaration(decl_type: &TypeDeclaration, config: &Config) -> Label {
+fn label_from_type_declaration(
+    decl_type: &TypeDeclaration,
+    config: &Config,
+    is_later: bool,
+) -> Label {
     let (color, description) = match decl_type.method {
         Method::Inferred => (config.inferred_color, "inferred"),
         Method::Declared => (config.specified_color, "declared"),
     };
     Label::new(decl_type.range.clone())
         .with_message(format!(
-            "Type {} to be {}",
+            "Type {}{} to be {}",
+            is_later.then_some("later ").unwrap_or_default(),
             description,
             decl_type.bash_type.fg(color)
         ))
