@@ -29,7 +29,7 @@ do_thing() {
 struct FileInfo<'src> {
     source_code: &'src str,
     parser: Parser,
-    variables: HashMap<String, BashType>,
+    variables: HashMap<String, TypeDeclaration>,
     errors: Vec<Report<'src>>,
     config: Config,
 }
@@ -79,6 +79,17 @@ impl Default for Config {
             previous_color: Color::Red,
         }
     }
+}
+
+struct TypeDeclaration {
+    range: Range<usize>,
+    bash_type: BashType,
+    method: Method,
+}
+
+enum Method {
+    Inferred,
+    Declared,
 }
 
 impl<'a> FileInfo<'a> {
@@ -153,7 +164,11 @@ impl<'a> FileInfo<'a> {
                 let final_type = if let Some(comment) = possible_comment {
                     let suggested_type = self.type_from_string(comment.text);
                     if inferred_type.matches(&suggested_type) {
-                        suggested_type
+                        TypeDeclaration {
+                            bash_type: suggested_type,
+                            range: comment.range,
+                            method: Method::Declared,
+                        }
                     } else {
                         self.errors.push(
                             Report::build(ReportKind::Error, (), cursor.node().start_byte())
@@ -179,23 +194,24 @@ impl<'a> FileInfo<'a> {
                         return;
                     }
                 } else {
-                    inferred_type
+                    TypeDeclaration {
+                        bash_type: inferred_type,
+                        range: inferred_location,
+                        method: Method::Inferred,
+                    }
                 };
                 if let Some(previous_type) = self.variables.get(name) {
-                    if !previous_type.matches(&final_type) {
+                    if !previous_type.bash_type.matches(&final_type.bash_type) {
                         self.errors.push(
                             Report::build(ReportKind::Error, (), cursor.node().start_byte())
                                 .with_message(format!(
                                     "Variable {name} defined with different type"
                                 ))
-                                .with_label(
-                                    Label::new(inferred_location)
-                                        .with_message(format!(
-                                            "Type later inferred to be {}",
-                                            inferred_type.fg(self.config.inferred_color)
-                                        ))
-                                        .with_color(self.config.inferred_color),
-                                )
+                                .with_label(label_from_type_declaration(
+                                    previous_type,
+                                    &self.config,
+                                ))
+                                .with_label(label_from_type_declaration(&final_type, &self.config))
                                 .finish(),
                         );
                     }
@@ -227,4 +243,18 @@ impl<'a> FileInfo<'a> {
             }
         }
     }
+}
+
+fn label_from_type_declaration(decl_type: &TypeDeclaration, config: &Config) -> Label {
+    let (color, description) = match decl_type.method {
+        Method::Inferred => (config.inferred_color, "inferred"),
+        Method::Declared => (config.specified_color, "declared"),
+    };
+    Label::new(decl_type.range.clone())
+        .with_message(format!(
+            "Type {} to be {}",
+            description,
+            decl_type.bash_type.fg(color)
+        ))
+        .with_color(color)
 }
