@@ -68,14 +68,12 @@ impl BashType {
 struct Config {
     specified_color: Color,
     inferred_color: Color,
-    previous_color: Color,
 }
 impl Default for Config {
     fn default() -> Self {
         Self {
             specified_color: Color::Blue,
             inferred_color: Color::Magenta,
-            previous_color: Color::Red,
         }
     }
 }
