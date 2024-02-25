@@ -3,13 +3,13 @@ use std::{collections::HashMap, fmt::Display, ops::Range};
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use tree_sitter::{Parser, TreeCursor};
 
-
 fn main() {
     let source_code = r#"# other thing
 do_thing() {
     #/ string
     value="lol"
 
+    #[force]
     #/ int
     fakeint="lol"
 
@@ -36,6 +36,7 @@ struct FileInfo<'src> {
     variables: HashMap<String, TypeDeclaration>,
     errors: Vec<Report<'src>>,
     config: Config,
+    force: bool,
 }
 
 #[derive(Clone)]
@@ -48,6 +49,7 @@ struct Comment {
 enum BashType {
     String,
     Integer,
+    Bool,
     Any,
 }
 
@@ -59,6 +61,7 @@ impl Display for BashType {
             match self {
                 BashType::Any => "any",
                 BashType::String => "string",
+                BashType::Bool => "bool",
                 BashType::Integer => "int",
             }
         )
@@ -108,6 +111,7 @@ impl<'a> FileInfo<'a> {
             variables: HashMap::new(),
             errors: Vec::new(),
             config: Config::default(),
+            force: false,
         }
     }
 
@@ -118,12 +122,15 @@ impl<'a> FileInfo<'a> {
             .unwrap();
         let range = cursor.node().start_byte()..cursor.node().end_byte();
 
-        comment.strip_prefix("#/").map(|comment_info| {
-            Some(Comment {
-                text: comment_info.trim().to_owned(),
-                range,
-            })
-        })?
+        comment
+            .strip_prefix("#/")
+            .or(comment.strip_prefix("#["))
+            .map(|comment_info| {
+                Some(Comment {
+                    text: comment_info.trim().to_owned(),
+                    range,
+                })
+            })?
     }
 
     fn infer_type(&self, cursor: &mut TreeCursor) -> BashType {
@@ -171,6 +178,7 @@ impl<'a> FileInfo<'a> {
         match input_type {
             "string" => BashType::String,
             "int" => BashType::Integer,
+            "bool" => BashType::Bool,
             "any" => BashType::Any,
             _ => todo!(),
         }
@@ -181,6 +189,15 @@ impl<'a> FileInfo<'a> {
             "comment" => {
                 let possible_comment = self.handle_comment(cursor).to_owned();
                 cursor.goto_next_sibling();
+                if let Some(command) = possible_comment
+                    .as_ref()
+                    .and_then(|v| v.text.strip_suffix(']'))
+                {
+                    match command {
+                        "force" => self.force = true,
+                        _ => (),
+                    }
+                }
                 self.handle_node(cursor, possible_comment)
             }
             "variable_assignment" => {
@@ -202,7 +219,7 @@ impl<'a> FileInfo<'a> {
                     .flatten();
                 let final_type = if let Some(comment) = inline_type.or(possible_comment) {
                     let suggested_type = self.type_from_string(&comment.text);
-                    if inferred_type.matches(&suggested_type) {
+                    if inferred_type.matches(&suggested_type) || self.force {
                         TypeDeclaration {
                             bash_type: suggested_type,
                             range: combine_ranges(comment.range, inferred_location),
@@ -240,7 +257,7 @@ impl<'a> FileInfo<'a> {
                     }
                 };
                 if let Some(previous_type) = self.variables.get(name) {
-                    if !previous_type.bash_type.matches(&final_type.bash_type) {
+                    if !previous_type.bash_type.matches(&final_type.bash_type) && !self.force {
                         self.errors.push(
                             Report::build(ReportKind::Error, (), cursor.node().start_byte())
                                 .with_message(format!(
@@ -285,6 +302,7 @@ impl<'a> FileInfo<'a> {
                     return;
                 }
             }
+            self.force = false;
         }
     }
 }
