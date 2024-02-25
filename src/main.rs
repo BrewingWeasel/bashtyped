@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display, ops::Range};
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
-use tree_sitter::{Node, Parser, TreeCursor};
+use tree_sitter::{Parser, TreeCursor};
 use tree_sitter_bash;
 
 fn main() {
@@ -14,6 +14,11 @@ do_thing() {
     fakeint="lol"
 
     value=1
+
+    real_var=1
+
+    #/ string
+    cool_stuff=$real_var
 }"#;
 
     let mut info = FileInfo::new(source_code);
@@ -125,11 +130,24 @@ impl<'a> FileInfo<'a> {
         }
     }
 
-    fn infer_type(&self, node: Node) -> BashType {
-        match node.kind() {
+    fn infer_type(&self, cursor: &mut TreeCursor) -> BashType {
+        match cursor.node().kind() {
             "number" => BashType::Integer,
             "word" => BashType::String,
             "string" => BashType::String, // TODO: make this handle other parts ex $()
+            "simple_expansion" => {
+                cursor.goto_first_child();
+                let var_name = cursor
+                    .goto_next_sibling()
+                    .then(|| {
+                        cursor
+                            .node()
+                            .utf8_text(&self.source_code.as_bytes())
+                            .unwrap()
+                    })
+                    .unwrap();
+                self.variables.get(var_name).unwrap().bash_type
+            }
             _ => todo!(),
         }
     }
@@ -154,8 +172,9 @@ impl<'a> FileInfo<'a> {
                     .utf8_text(self.source_code.as_bytes())
                     .unwrap();
                 cursor.goto_next_sibling();
-                let value = cursor.goto_next_sibling().then(|| cursor.node()).unwrap();
-                let inferred_type = self.infer_type(value);
+
+                cursor.goto_next_sibling();
+                let inferred_type = self.infer_type(cursor);
 
                 let inferred_location = cursor.node().start_byte()..cursor.node().end_byte();
                 let final_type = if let Some(comment) = possible_comment {
