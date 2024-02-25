@@ -13,7 +13,7 @@ do_thing() {
     #/ int
     fakeint="lol"
 
-    value=1
+    value=1 #/ int
 
     real_var=1
 
@@ -38,8 +38,9 @@ struct FileInfo<'src> {
     config: Config,
 }
 
-struct Comment<'src> {
-    text: &'src str,
+#[derive(Clone)]
+struct Comment {
+    text: String,
     range: Range<usize>,
 }
 
@@ -110,24 +111,19 @@ impl<'a> FileInfo<'a> {
         }
     }
 
-    fn handle_comment(&mut self, cursor: &mut TreeCursor) {
+    fn handle_comment(&self, cursor: &mut TreeCursor) -> Option<Comment> {
         let comment = cursor
             .node()
             .utf8_text(self.source_code.as_bytes())
             .unwrap();
         let range = cursor.node().start_byte()..cursor.node().end_byte();
 
-        if let Some(comment_info) = comment.strip_prefix("#/") {
-            if cursor.goto_next_sibling() {
-                self.handle_node(
-                    cursor,
-                    Some(Comment {
-                        text: comment_info.trim(),
-                        range,
-                    }),
-                )
-            }
-        }
+        comment.strip_prefix("#/").map(|comment_info| {
+            Some(Comment {
+                text: comment_info.trim().to_owned(),
+                range,
+            })
+        })?
     }
 
     fn infer_type(&self, cursor: &mut TreeCursor) -> BashType {
@@ -182,8 +178,13 @@ impl<'a> FileInfo<'a> {
 
     fn handle_node(&mut self, cursor: &mut TreeCursor, possible_comment: Option<Comment>) {
         match cursor.node().kind() {
-            "comment" => self.handle_comment(cursor),
+            "comment" => {
+                let possible_comment = self.handle_comment(cursor).to_owned();
+                cursor.goto_next_sibling();
+                self.handle_node(cursor, possible_comment)
+            }
             "variable_assignment" => {
+                println!("{}", cursor.node().to_sexp());
                 let name = cursor
                     .goto_first_child()
                     .then(|| cursor.node())
@@ -195,15 +196,17 @@ impl<'a> FileInfo<'a> {
                 let inferred_type = self.infer_type(cursor);
 
                 let inferred_location = cursor.node().start_byte()..cursor.node().end_byte();
-                let final_type = if let Some(comment) = possible_comment {
-                    let suggested_type = self.type_from_string(comment.text);
+
+                cursor.goto_parent();
+                let inline_type = (cursor.goto_next_sibling() && cursor.node().kind() == "comment")
+                    .then(|| self.handle_comment(cursor))
+                    .flatten();
+                let final_type = if let Some(comment) = inline_type.or(possible_comment) {
+                    let suggested_type = self.type_from_string(&comment.text);
                     if inferred_type.matches(&suggested_type) {
                         TypeDeclaration {
                             bash_type: suggested_type,
-                            range: Range {
-                                start: comment.range.start,
-                                end: inferred_location.end,
-                            },
+                            range: combine_ranges(comment.range, inferred_location),
                             method: Method::Declared,
                         }
                     } else {
@@ -304,4 +307,11 @@ fn label_from_type_declaration(
             decl_type.bash_type.fg(color)
         ))
         .with_color(color)
+}
+
+fn combine_ranges(r1: Range<usize>, r2: Range<usize>) -> Range<usize> {
+    Range {
+        start: r1.start.min(r2.start),
+        end: r2.end.max(r1.end),
+    }
 }
