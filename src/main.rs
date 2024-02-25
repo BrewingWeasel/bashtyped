@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display, ops::Range};
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use tree_sitter::{Parser, TreeCursor};
-use tree_sitter_bash;
+
 
 fn main() {
     let source_code = r#"# other thing
@@ -154,7 +154,7 @@ impl<'a> FileInfo<'a> {
                     .then(|| {
                         cursor
                             .node()
-                            .utf8_text(&self.source_code.as_bytes())
+                            .utf8_text(self.source_code.as_bytes())
                             .unwrap()
                     })
                     .unwrap();
@@ -184,7 +184,6 @@ impl<'a> FileInfo<'a> {
                 self.handle_node(cursor, possible_comment)
             }
             "variable_assignment" => {
-                println!("{}", cursor.node().to_sexp());
                 let name = cursor
                     .goto_first_child()
                     .then(|| cursor.node())
