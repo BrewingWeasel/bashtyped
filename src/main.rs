@@ -18,7 +18,7 @@ do_thing() {
     real_var=1
 
     #/ string
-    cool_stuff=$real_var
+    cool_stuff="it is $real_var"
 }"#;
 
     let mut info = FileInfo::new(source_code);
@@ -134,7 +134,23 @@ impl<'a> FileInfo<'a> {
         match cursor.node().kind() {
             "number" => BashType::Integer,
             "word" => BashType::String,
-            "string" => BashType::String, // TODO: make this handle other parts ex $()
+            "string" => {
+                if cursor.node().named_child_count() == 1 {
+                    cursor
+                        .goto_first_child()
+                        .then(|| {
+                            cursor.goto_next_sibling();
+                            if cursor.node().kind() == "string_content" {
+                                BashType::String
+                            } else {
+                                self.infer_type(cursor)
+                            }
+                        })
+                        .unwrap()
+                } else {
+                    BashType::String
+                }
+            }
             "simple_expansion" => {
                 cursor.goto_first_child();
                 let var_name = cursor
@@ -148,7 +164,10 @@ impl<'a> FileInfo<'a> {
                     .unwrap();
                 self.variables.get(var_name).unwrap().bash_type
             }
-            _ => todo!(),
+            _ => {
+                println!("{:?}", cursor.node().kind());
+                todo!()
+            }
         }
     }
 
@@ -172,7 +191,6 @@ impl<'a> FileInfo<'a> {
                     .utf8_text(self.source_code.as_bytes())
                     .unwrap();
                 cursor.goto_next_sibling();
-
                 cursor.goto_next_sibling();
                 let inferred_type = self.infer_type(cursor);
 
