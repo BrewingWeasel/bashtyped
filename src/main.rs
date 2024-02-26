@@ -13,6 +13,12 @@ do_thing() {
     #/ int
     fakeint="lol"
 
+    #[set_var(input, int)]
+    read input
+
+    #/ int
+    other_int=$input
+
     value=1 #/ int
 
     real_var=1
@@ -175,7 +181,7 @@ impl<'a> FileInfo<'a> {
     }
 
     fn type_from_string(&self, input_type: &str) -> BashType {
-        match input_type {
+        match input_type.trim() {
             "string" => BashType::String,
             "int" => BashType::Integer,
             "bool" => BashType::Bool,
@@ -195,7 +201,20 @@ impl<'a> FileInfo<'a> {
                 {
                     match command {
                         "force" => self.force = true,
-                        _ => (),
+                        func_command => {
+                            if let Some(info) = func_command
+                                .strip_prefix("set_var(")
+                                .and_then(|conts| conts.strip_suffix(')'))
+                            {
+                                let (var_name, var_type) = info.split_once(',').unwrap();
+                                let final_type = TypeDeclaration {
+                                    range: cursor.node().start_byte()..cursor.node().end_byte(),
+                                    bash_type: self.type_from_string(var_type),
+                                    method: Method::Declared,
+                                };
+                                self.set_variable(var_name, final_type, cursor);
+                            }
+                        }
                     }
                 }
                 self.handle_node(cursor, possible_comment)
@@ -256,29 +275,7 @@ impl<'a> FileInfo<'a> {
                         method: Method::Inferred,
                     }
                 };
-                if let Some(previous_type) = self.variables.get(name) {
-                    if !previous_type.bash_type.matches(&final_type.bash_type) && !self.force {
-                        self.errors.push(
-                            Report::build(ReportKind::Error, (), cursor.node().start_byte())
-                                .with_message(format!(
-                                    "Variable {name} defined with different type"
-                                ))
-                                .with_label(label_from_type_declaration(
-                                    previous_type,
-                                    &self.config,
-                                    false,
-                                ))
-                                .with_label(label_from_type_declaration(
-                                    &final_type,
-                                    &self.config,
-                                    true,
-                                ))
-                                .finish(),
-                        );
-                    }
-                } else {
-                    self.variables.insert(name.to_owned(), final_type);
-                }
+                self.set_variable(name, final_type, cursor);
             }
             _ => (),
         }
@@ -303,6 +300,26 @@ impl<'a> FileInfo<'a> {
                 }
             }
             self.force = false;
+        }
+    }
+
+    fn set_variable(&mut self, name: &str, final_type: TypeDeclaration, cursor: &TreeCursor) {
+        if let Some(previous_type) = self.variables.get(name) {
+            if !previous_type.bash_type.matches(&final_type.bash_type) && !self.force {
+                self.errors.push(
+                    Report::build(ReportKind::Error, (), cursor.node().start_byte())
+                        .with_message(format!("Variable {name} defined with different type"))
+                        .with_label(label_from_type_declaration(
+                            previous_type,
+                            &self.config,
+                            false,
+                        ))
+                        .with_label(label_from_type_declaration(&final_type, &self.config, true))
+                        .finish(),
+                );
+            }
+        } else {
+            self.variables.insert(name.to_owned(), final_type);
         }
     }
 }
