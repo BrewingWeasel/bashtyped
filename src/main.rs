@@ -32,7 +32,9 @@ do_thing() {
     info.parse_code();
 
     for error in info.errors {
-        error.print(Source::from(info.source_code)).unwrap();
+        error
+            .print(Source::from(info.source_code))
+            .expect("comment printing to work");
     }
 }
 
@@ -68,6 +70,7 @@ struct ParseError {
 enum ParseErrType {
     MissingArgument { expected: usize, received: usize },
     InvalidUnicode,
+    UnknownVariable(String),
 }
 
 impl Display for ParseErrType {
@@ -78,6 +81,7 @@ impl Display for ParseErrType {
                 expected: e,
                 received: r,
             } => write!(f, "Expected {e} arguments, but found {r}"),
+            Self::UnknownVariable(var_name) => write!(f, "Found unknown variable {var_name}"),
         }
     }
 }
@@ -199,8 +203,16 @@ impl<'a> FileInfo<'a> {
                                 end: cursor.node().end_byte(),
                             })
                     })
-                    .unwrap();
-                Ok(self.variables.get(var_name?).unwrap().bash_type)
+                    .expect("Variable to have a name")?;
+                Ok(self
+                    .variables
+                    .get(var_name)
+                    .ok_or_else(|| ParseError {
+                        err_type: ParseErrType::UnknownVariable(var_name.to_owned()),
+                        start: cursor.node().start_byte(),
+                        end: cursor.node().end_byte(),
+                    })?
+                    .bash_type)
             }
             _ => {
                 println!("{:?}", cursor.node().kind());
@@ -331,7 +343,10 @@ impl<'a> FileInfo<'a> {
     }
 
     pub fn parse_code(&mut self) {
-        let tree = self.parser.parse(self.source_code, None).unwrap();
+        let tree = self
+            .parser
+            .parse(self.source_code, None)
+            .expect("treesitter to parse valid code");
         let root_node = tree.root_node();
 
         let mut cursor = root_node.walk();
