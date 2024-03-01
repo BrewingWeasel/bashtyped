@@ -148,39 +148,41 @@ impl<'a> FileInfo<'a> {
         }
     }
 
-    fn handle_comment(&self, cursor: &mut TreeCursor) -> Option<Comment> {
+    fn handle_comment(&self, cursor: &mut TreeCursor) -> ParseResult<Option<Comment>> {
         let comment = cursor
             .node()
             .utf8_text(self.source_code.as_bytes())
-            .unwrap();
+            .map_err(|_| ParseError {
+                err_type: ParseErrType::InvalidUnicode,
+                start: cursor.node().start_byte(),
+                end: cursor.node().end_byte(),
+            })?;
         let range = cursor.node().start_byte()..cursor.node().end_byte();
 
-        comment
+        Ok(comment
             .strip_prefix("#/")
             .or(comment.strip_prefix("#["))
-            .map(|comment_info| {
-                Some(Comment {
-                    text: comment_info.trim().to_owned(),
-                    range,
-                })
-            })?
+            .map(|comment_info| Comment {
+                text: comment_info.trim().to_owned(),
+                range,
+            }))
     }
 
-    fn infer_type(&self, cursor: &mut TreeCursor) -> BashType {
+    fn infer_type(&self, cursor: &mut TreeCursor) -> ParseResult<BashType> {
         match cursor.node().kind() {
-            "number" => BashType::Integer,
-            "word" => BashType::String,
+            "number" => Ok(BashType::Integer),
+            "word" => Ok(BashType::String),
             "string" => {
                 if cursor.node().named_child_count() == 1 {
                     assert!(cursor.goto_first_child(), "named_child_count is one");
                     cursor.goto_next_sibling();
                     if cursor.node().kind() == "string_content" {
-                        BashType::String
+                        Ok(BashType::String)
                     } else {
                         self.infer_type(cursor)
                     }
                 } else {
-                    BashType::String
+                    Ok(BashType::String)
                 }
             }
             "simple_expansion" => {
@@ -191,10 +193,14 @@ impl<'a> FileInfo<'a> {
                         cursor
                             .node()
                             .utf8_text(self.source_code.as_bytes())
-                            .unwrap()
+                            .map_err(|_| ParseError {
+                                err_type: ParseErrType::InvalidUnicode,
+                                start: cursor.node().start_byte(),
+                                end: cursor.node().end_byte(),
+                            })
                     })
                     .unwrap();
-                self.variables.get(var_name).unwrap().bash_type
+                Ok(self.variables.get(var_name?).unwrap().bash_type)
             }
             _ => {
                 println!("{:?}", cursor.node().kind());
@@ -220,7 +226,7 @@ impl<'a> FileInfo<'a> {
     ) -> ParseResult<()> {
         match cursor.node().kind() {
             "comment" => {
-                let possible_comment = self.handle_comment(cursor).to_owned();
+                let possible_comment = self.handle_comment(cursor)?.to_owned();
                 cursor.goto_next_sibling();
                 if let Some(command) = possible_comment
                     .as_ref()
@@ -257,22 +263,27 @@ impl<'a> FileInfo<'a> {
                 self.handle_node(cursor, possible_comment)?;
             }
             "variable_assignment" => {
+                cursor.goto_first_child();
                 let name = cursor
-                    .goto_first_child()
-                    .then(|| cursor.node())
-                    .unwrap()
+                    .node()
                     .utf8_text(self.source_code.as_bytes())
-                    .unwrap();
+                    .map_err(|_| ParseError {
+                        err_type: ParseErrType::InvalidUnicode,
+                        start: cursor.node().start_byte(),
+                        end: cursor.node().end_byte(),
+                    })?;
                 cursor.goto_next_sibling();
                 cursor.goto_next_sibling();
-                let inferred_type = self.infer_type(cursor);
+                let inferred_type = self.infer_type(cursor)?;
 
                 let inferred_location = cursor.node().start_byte()..cursor.node().end_byte();
 
                 cursor.goto_parent();
                 let inline_type = (cursor.goto_next_sibling() && cursor.node().kind() == "comment")
                     .then(|| self.handle_comment(cursor))
+                    .transpose()?
                     .flatten();
+
                 let final_type = if let Some(comment) = inline_type.or(possible_comment) {
                     let suggested_type = self.type_from_string(&comment.text);
                     if inferred_type.matches(&suggested_type) || self.force {
