@@ -5,27 +5,10 @@ use tree_sitter::{Parser, TreeCursor};
 
 fn main() {
     let source_code = r#"# other thing
-do_thing() {
-    #/ string
-    value="lol"
-
-    #[force]
-    #/ int
-    fakeint="lol"
-
-    #[set_var(input, int)]
-    read input
-
-    #/ int
-    other_int=$input
-
-    value=1 #/ int
-
-    real_var=1
-
-    #/ string
-    cool_stuff="it is $real_var"
-}"#;
+val="lol" #/ bool | string
+val=1 #/ int
+echo "hi"
+"#;
 
     let mut info = FileInfo::new(source_code);
 
@@ -47,18 +30,19 @@ struct FileInfo<'src> {
     force: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Comment {
     text: String,
     range: Range<usize>,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone)]
 enum BashType {
     String,
     Integer,
     Bool,
     Any,
+    Or(Box<BashType>, Box<BashType>),
 }
 
 struct ParseError {
@@ -90,21 +74,24 @@ type ParseResult<T> = std::result::Result<T, ParseError>;
 
 impl Display for BashType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                BashType::Any => "any",
-                BashType::String => "string",
-                BashType::Bool => "bool",
-                BashType::Integer => "int",
-            }
-        )
+        match self {
+            BashType::Any => write!(f, "any"),
+            BashType::String => write!(f, "string"),
+            BashType::Bool => write!(f, "bool"),
+            BashType::Integer => write!(f, "int"),
+            BashType::Or(t1, t2) => write!(f, "{t1} | {t2}"),
+        }
     }
 }
 
 impl BashType {
     fn matches(&self, other: &Self) -> bool {
+        if let BashType::Or(t1, t2) = self {
+            return t1.matches(other) || t2.matches(other);
+        }
+        if let BashType::Or(t1, t2) = other {
+            return t1.matches(self) || t2.matches(self);
+        }
         self == &BashType::Any || other == &BashType::Any || self == other
     }
 }
@@ -124,12 +111,14 @@ impl Default for Config {
     }
 }
 
+#[derive(Debug)]
 struct TypeDeclaration {
     range: Range<usize>,
     bash_type: BashType,
     method: Method,
 }
 
+#[derive(Debug)]
 enum Method {
     Inferred,
     Declared,
@@ -212,7 +201,8 @@ impl<'a> FileInfo<'a> {
                         start: cursor.node().start_byte(),
                         end: cursor.node().end_byte(),
                     })?
-                    .bash_type)
+                    .bash_type
+                    .clone())
             }
             _ => {
                 println!("{:?}", cursor.node().kind());
@@ -227,7 +217,15 @@ impl<'a> FileInfo<'a> {
             "int" => BashType::Integer,
             "bool" => BashType::Bool,
             "any" => BashType::Any,
-            _ => todo!(),
+            v => {
+                let Some((first, second)) = v.split_once('|') else {
+                    todo!();
+                };
+                BashType::Or(
+                    Box::new(self.type_from_string(first)),
+                    Box::new(self.type_from_string(second)),
+                )
+            }
         }
     }
 
@@ -272,6 +270,9 @@ impl<'a> FileInfo<'a> {
                         }
                     }
                 }
+                // if !cursor.goto_next_sibling() && !cursor.goto_parent() {
+                //     return Ok(());
+                // }
                 self.handle_node(cursor, possible_comment)?;
             }
             "variable_assignment" => {
@@ -348,7 +349,6 @@ impl<'a> FileInfo<'a> {
             .parse(self.source_code, None)
             .expect("treesitter to parse valid code");
         let root_node = tree.root_node();
-
         let mut cursor = root_node.walk();
 
         loop {
@@ -413,7 +413,7 @@ fn label_from_type_declaration(
             "Type {}{} to be {}",
             is_later.then_some("later ").unwrap_or_default(),
             description,
-            decl_type.bash_type.fg(color)
+            decl_type.bash_type.clone().fg(color)
         ))
         .with_color(color)
 }
