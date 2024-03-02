@@ -169,11 +169,13 @@ impl<'a> FileInfo<'a> {
                 if cursor.node().named_child_count() == 1 {
                     assert!(cursor.goto_first_child(), "named_child_count is one");
                     cursor.goto_next_sibling();
-                    if cursor.node().kind() == "string_content" {
+                    let inferred_type = if cursor.node().kind() == "string_content" {
                         Ok(BashType::String)
                     } else {
                         self.infer_type(cursor)
-                    }
+                    };
+                    assert!(cursor.goto_parent(), "moving up from previous position");
+                    inferred_type
                 } else {
                     Ok(BashType::String)
                 }
