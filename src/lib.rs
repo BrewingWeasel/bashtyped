@@ -281,10 +281,16 @@ impl<'a> FileInfo<'a> {
                     .start_byte()..cursor.node().end_byte();
 
                 cursor.goto_parent();
-                let inline_type = (cursor.goto_next_sibling() && cursor.node().kind() == "comment")
-                    .then(|| self.handle_comment(cursor))
-                    .transpose()?
-                    .flatten();
+                let inline_type = (cursor
+                    .node()
+                    .next_sibling()
+                    .is_some_and(|node| node.kind() == "comment"))
+                .then(|| {
+                    cursor.goto_next_sibling();
+                    self.handle_comment(cursor)
+                })
+                .transpose()?
+                .flatten();
 
                 let final_type = if let Some(comment) = inline_type.or(possible_comment) {
                     let suggested_type = self.type_from_string(&comment.text);
