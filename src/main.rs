@@ -272,9 +272,9 @@ impl<'a> FileInfo<'a> {
                         }
                     }
                 }
-                // if !cursor.goto_next_sibling() && !cursor.goto_parent() {
-                //     return Ok(());
-                // }
+                if cursor.node().next_sibling().is_none() {
+                    return Ok(());
+                }
                 self.handle_node(cursor, possible_comment)?;
             }
             "variable_assignment" => {
