@@ -6,7 +6,7 @@ use tree_sitter::{Parser, TreeCursor};
 pub struct FileInfo<'src> {
     pub source_code: &'src str,
     parser: Parser,
-    variables: HashMap<String, TypeDeclaration>,
+    pub variables: HashMap<String, TypeDeclaration>,
     pub errors: Vec<Report<'src>>,
     config: Config,
     force: bool,
@@ -18,8 +18,8 @@ struct Comment {
     range: Range<usize>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
-enum BashType {
+#[derive(Debug, PartialEq, Clone, Eq)]
+pub enum BashType {
     String,
     Integer,
     Bool,
@@ -93,15 +93,15 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug)]
-struct TypeDeclaration {
-    range: Range<usize>,
-    bash_type: BashType,
-    method: Method,
+#[derive(Debug, PartialEq, Eq)]
+pub struct TypeDeclaration {
+    pub range: Range<usize>,
+    pub bash_type: BashType,
+    pub method: Method,
 }
 
-#[derive(Debug)]
-enum Method {
+#[derive(Debug, PartialEq, Eq)]
+pub enum Method {
     Inferred,
     Declared,
 }
@@ -221,7 +221,7 @@ impl<'a> FileInfo<'a> {
         match cursor.node().kind() {
             "comment" => {
                 let possible_comment = self.handle_comment(cursor)?.to_owned();
-                cursor.goto_next_sibling();
+                let available_sibling = cursor.goto_next_sibling();
                 if let Some(command) = possible_comment
                     .as_ref()
                     .and_then(|v| v.text.strip_suffix(']'))
@@ -254,7 +254,7 @@ impl<'a> FileInfo<'a> {
                         }
                     }
                 }
-                if cursor.node().next_sibling().is_none() {
+                if !available_sibling {
                     return Ok(());
                 }
                 self.handle_node(cursor, possible_comment)?;
