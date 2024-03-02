@@ -273,7 +273,12 @@ impl<'a> FileInfo<'a> {
                 cursor.goto_next_sibling();
                 let inferred_type = self.infer_type(cursor)?;
 
-                let inferred_location = cursor.node().start_byte()..cursor.node().end_byte();
+                let inferred_location = cursor
+                    .node()
+                    .prev_sibling()
+                    .and_then(|v| v.prev_sibling())
+                    .expect("already to have checked previous siblings")
+                    .start_byte()..cursor.node().end_byte();
 
                 cursor.goto_parent();
                 let inline_type = (cursor.goto_next_sibling() && cursor.node().kind() == "comment")
