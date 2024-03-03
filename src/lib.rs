@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display, ops::Range};
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind};
-use tree_sitter::{Parser, TreeCursor};
+use tree_sitter::{Node, Parser, TreeCursor};
 
 pub struct FileInfo<'src> {
     pub source_code: &'src str,
@@ -143,53 +143,45 @@ impl<'a> FileInfo<'a> {
             }))
     }
 
-    fn infer_type(&self, cursor: &mut TreeCursor) -> ParseResult<BashType> {
-        match cursor.node().kind() {
+    fn infer_type(&self, node: Node) -> ParseResult<BashType> {
+        match node.kind() {
             "number" => Ok(BashType::Integer),
             "word" => Ok(BashType::String),
             "string" => {
-                if cursor.node().named_child_count() == 1 {
-                    assert!(cursor.goto_first_child(), "named_child_count is one");
-                    cursor.goto_next_sibling();
-                    let inferred_type = if cursor.node().kind() == "string_content" {
+                if node.named_child_count() == 1 {
+                    let content = node.child(1).expect("named child count to be one");
+                    let inferred_type = if content.kind() == "string_content" {
                         Ok(BashType::String)
                     } else {
-                        self.infer_type(cursor)
+                        self.infer_type(content)
                     };
-                    assert!(cursor.goto_parent(), "moving up from previous position");
                     inferred_type
                 } else {
                     Ok(BashType::String)
                 }
             }
             "simple_expansion" => {
-                cursor.goto_first_child();
-                let var_name = cursor
-                    .goto_next_sibling()
-                    .then(|| {
-                        cursor
-                            .node()
-                            .utf8_text(self.source_code.as_bytes())
-                            .map_err(|_| ParseError {
-                                err_type: ParseErrType::InvalidUnicode,
-                                start: cursor.node().start_byte(),
-                                end: cursor.node().end_byte(),
-                            })
-                    })
-                    .expect("Variable to have a name")?;
+                let variable = node.child(1).expect("Variable to have a name");
+                let var_name = variable
+                    .utf8_text(self.source_code.as_bytes())
+                    .map_err(|_| ParseError {
+                        err_type: ParseErrType::InvalidUnicode,
+                        start: variable.start_byte(),
+                        end: variable.end_byte(),
+                    })?;
                 Ok(self
                     .variables
                     .get(var_name)
                     .ok_or_else(|| ParseError {
                         err_type: ParseErrType::UnknownVariable(var_name.to_owned()),
-                        start: cursor.node().start_byte(),
-                        end: cursor.node().end_byte(),
+                        start: variable.start_byte(),
+                        end: variable.end_byte(),
                     })?
                     .bash_type
                     .clone())
             }
             _ => {
-                println!("{:?}", cursor.node().kind());
+                println!("{:?}", node.kind());
                 todo!()
             }
         }
@@ -271,7 +263,7 @@ impl<'a> FileInfo<'a> {
                     })?;
                 cursor.goto_next_sibling();
                 cursor.goto_next_sibling();
-                let inferred_type = self.infer_type(cursor)?;
+                let inferred_type = self.infer_type(cursor.node())?;
 
                 let inferred_location = cursor
                     .node()
