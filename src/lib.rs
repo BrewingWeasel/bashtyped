@@ -76,6 +76,29 @@ impl BashType {
         }
         self == &BashType::Any || other == &BashType::Any || self == other
     }
+
+    fn types_from_or(&self) -> Vec<Self> {
+        if let BashType::Or(t1, t2) = self {
+            let mut v = t1.types_from_or();
+            v.extend_from_slice(&t2.types_from_or());
+            v
+        } else {
+            vec![self.clone()]
+        }
+    }
+
+    fn can_contain(&self, other: &Self) -> bool {
+        if let BashType::Or(t1, t2) = self {
+            if let BashType::Or(_, _) = other {
+                let self_types = self.types_from_or();
+                other.types_from_or().iter().all(|v| self_types.contains(v))
+            } else {
+                t1.matches(other) || t2.matches(other)
+            }
+        } else {
+            self == &BashType::Any || self == other
+        }
+    }
 }
 
 struct Config {
@@ -286,7 +309,7 @@ impl<'a> FileInfo<'a> {
 
                 let final_type = if let Some(comment) = inline_type.or(possible_comment) {
                     let suggested_type = self.type_from_string(&comment.text);
-                    if inferred_type.matches(&suggested_type) || self.force {
+                    if suggested_type.can_contain(&inferred_type) || self.force {
                         TypeDeclaration {
                             bash_type: suggested_type,
                             range: combine_ranges(comment.range, inferred_location),
@@ -367,7 +390,7 @@ impl<'a> FileInfo<'a> {
 
     fn set_variable(&mut self, name: &str, final_type: TypeDeclaration, cursor: &TreeCursor) {
         if let Some(previous_type) = self.variables.get(name) {
-            if !previous_type.bash_type.matches(&final_type.bash_type) && !self.force {
+            if !final_type.bash_type.can_contain(&previous_type.bash_type) && !self.force {
                 self.errors.push(
                     Report::build(ReportKind::Error, (), cursor.node().start_byte())
                         .with_message(format!("Variable {name} defined with different type"))
