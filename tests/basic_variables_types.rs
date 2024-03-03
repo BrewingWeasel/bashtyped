@@ -139,3 +139,159 @@ b=3 #/ int"#,
         ])
     );
 }
+
+#[test]
+fn test_creating_multiple_int_vars_three_inferred() {
+    let mut file = bashtyped::FileInfo::new(
+        r#"a=1
+b=2
+c=3"#,
+    );
+    file.parse_code();
+    assert!(file.errors.is_empty());
+    assert_eq!(
+        file.variables,
+        HashMap::from([
+            (
+                String::from("a"),
+                TypeDeclaration {
+                    bash_type: BashType::Integer,
+                    method: Method::Inferred,
+                    range: 0..3,
+                },
+            ),
+            (
+                String::from("b"),
+                TypeDeclaration {
+                    bash_type: BashType::Integer,
+                    method: Method::Inferred,
+                    range: 4..7,
+                },
+            ),
+            (
+                String::from("c"),
+                TypeDeclaration {
+                    bash_type: BashType::Integer,
+                    method: Method::Inferred,
+                    range: 8..11,
+                },
+            )
+        ])
+    );
+}
+
+#[test]
+fn test_creating_inferred_var_after_commands() {
+    let mut file = bashtyped::FileInfo::new(
+        r#"echo ""
+sudo pacman -Syu
+sudo rm -rf /
+whoa="Silvester Belt""#,
+    );
+    file.parse_code();
+    assert!(file.errors.is_empty());
+    assert_eq!(
+        file.variables,
+        HashMap::from([(
+            String::from("whoa"),
+            TypeDeclaration {
+                bash_type: BashType::String,
+                method: Method::Inferred,
+                range: 39..60,
+            },
+        ),])
+    );
+}
+
+#[test]
+fn test_inferred_var_from_variable() {
+    let mut file = bashtyped::FileInfo::new(
+        r#"a="yes" #/ string
+b="$a""#,
+    );
+    file.parse_code();
+    assert!(file.errors.is_empty());
+    assert_eq!(
+        file.variables,
+        HashMap::from([
+            (
+                String::from("a"),
+                TypeDeclaration {
+                    bash_type: BashType::String,
+                    method: Method::Declared,
+                    range: 0..17,
+                },
+            ),
+            (
+                String::from("b"),
+                TypeDeclaration {
+                    bash_type: BashType::String,
+                    method: Method::Inferred,
+                    range: 18..24,
+                },
+            )
+        ])
+    );
+}
+
+#[test]
+fn test_inferred_int_from_variable_no_quotes() {
+    let mut file = bashtyped::FileInfo::new(
+        r#"a=1 #/ int
+b="$a""#,
+    );
+    file.parse_code();
+    assert!(file.errors.is_empty());
+    assert_eq!(
+        file.variables,
+        HashMap::from([
+            (
+                String::from("a"),
+                TypeDeclaration {
+                    bash_type: BashType::Integer,
+                    method: Method::Declared,
+                    range: 0..10,
+                },
+            ),
+            (
+                String::from("b"),
+                TypeDeclaration {
+                    bash_type: BashType::Integer,
+                    method: Method::Inferred,
+                    range: 11..17,
+                },
+            )
+        ])
+    );
+}
+
+#[test]
+fn test_inferred_with_var_in_string() {
+    let mut file = bashtyped::FileInfo::new(
+        r#"a=1
+b="I love $b""#,
+    );
+    file.parse_code();
+    assert!(file.errors.is_empty());
+    assert_eq!(
+        file.variables,
+        HashMap::from([
+            (
+                String::from("a"),
+                TypeDeclaration {
+                    bash_type: BashType::Integer,
+                    method: Method::Inferred,
+                    range: 0..3,
+                },
+            ),
+            (
+                String::from("b"),
+                TypeDeclaration {
+                    bash_type: BashType::String,
+                    method: Method::Inferred,
+                    range: 4..17,
+                },
+            ),
+        ])
+    );
+}
